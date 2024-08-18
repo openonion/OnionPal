@@ -2,18 +2,10 @@ import discord
 from discord.ext import commands
 import logging
 import aiohttp
-import os
 import asyncio
-from dotenv import load_dotenv
+from config import DISCORD_TOKEN, API_URL, API_TOKEN  # Import from config.py
 from question_detector import is_question
 import json
-
-# Load environment variables
-load_dotenv()
-
-DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-API_URL = os.getenv('API_URL')
-API_TOKEN = os.getenv('API_TOKEN')  # Read the API token from .env
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +16,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 async def get_answer(question):
-    url = f'{API_URL}/api/v1/chat/message'
+    url = f'{API_URL}/api/v1/chat/premium_message'
 
     payload = {
         "messages": [
@@ -90,6 +82,13 @@ async def on_message(message):
                 display_message += word + " "
                 logging.info(f'Updating message: {display_message.strip()}')
                 await msg.edit(content=display_message)
+            
+            # Send additional information after the response
+            additional_message = (
+                "For better service, please visit https://openonion.ai.\n"
+                "If you want to customize this bot, you can check the source code here: https://github.com/openonion/OnionPal"
+            )
+            await message.channel.send(additional_message)
 
     await bot.process_commands(message)
 
@@ -103,6 +102,13 @@ async def ask_question(ctx, *, question):
             display_message += word + " "
             logging.info(f'Updating message: {display_message.strip()}')
             await msg.edit(content=display_message)
+        
+        # Send additional information after the response
+        additional_message = (
+            "For better answer and service, please visit https://openonion.ai.\n"
+            "If you want to customize this bot, you can check the source code here: https://github.com/openonion/OnionPal"
+        )
+        await ctx.send(additional_message)
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
