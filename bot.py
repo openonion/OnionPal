@@ -34,7 +34,7 @@ async def get_answer(question):
             }
         ],
         "stream": False,
-        "model": "default",
+        "model": "ofCourse",
         "temperature": 0,
         "presence_penalty": 0,
         "frequency_penalty": 0,
