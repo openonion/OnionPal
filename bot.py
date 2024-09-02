@@ -76,19 +76,15 @@ async def get_user_info():
                 user_info = await response.json()
                 formatted_info = (
                     f"User Info:\n"
-                    f"  User ID: {user_info.get('user_id')}\n"
                     f"  Email: {user_info.get('email')}\n"
                     f"  First Name: {user_info.get('first_name')}\n"
                     f"  Last Name: {user_info.get('last_name')}\n"
-                    f"  Role: {user_info.get('role')}\n"
                     f"  Created At: {user_info.get('created_at')}\n"
                     f"  Updated At: {user_info.get('updated_at')}\n"
-                    f"  Email Verified: {user_info.get('email_verified')}\n"
                     f"  Credits: {user_info.get('credits')}\n"
                     f"  Nickname: {user_info.get('nickname')}\n"
                     f"  Description: {user_info.get('description')}\n"
                     f"  Invitation Code: {user_info.get('invitation_code')}\n"
-                    f"  Avatar: {user_info.get('avatar')}\n"
                 )
                 logging.info(formatted_info)
             else:
