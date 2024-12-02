@@ -16,7 +16,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-async def get_message_history(channel, current_message, limit=5):
+async def get_message_history(channel, current_message, limit=10):
     messages = []
     async for msg in channel.history(limit=limit, before=current_message):
         if msg.author == bot.user:
@@ -137,15 +137,11 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    logging.info(f'Received message: {message.content}')
-
-    # Check if the bot is mentioned
+    # Case 1: Bot mention
     if bot.user in message.mentions:
         async with message.channel.typing():
-            # Get message history and construct messages
-            previous_messages = await get_message_history(message.channel, message)
+            previous_messages = await get_message_history(message.channel, message)  # Gets 10 messages
             messages = previous_messages + [{"role": "user", "content": message.content}]
-            
             response = await get_answer(messages)
             await message.reply(response)
             
@@ -153,19 +149,16 @@ async def on_message(message):
                 "For better service, please visit https://openonion.ai.\n"
             )
             await message.channel.send(additional_message)
-        return
 
+    # Case 2: Question detection
     if is_question(message.content):
         is_unsw_related, explanation = await evaluate_unsw_relevance(message.content)
-        
         if not is_unsw_related:
-            return  # Silently ignore non-UNSW questions
+            return
 
         async with message.channel.typing():
-            # Get message history and construct messages
-            previous_messages = await get_message_history(message.channel, message)
+            previous_messages = await get_message_history(message.channel, message)  # Gets 10 messages
             messages = previous_messages + [{"role": "user", "content": message.content}]
-            
             response = await get_answer(messages)
             await message.reply(response)
             
@@ -186,9 +179,8 @@ async def ask_question(ctx, *, question):
         return  # Silently ignore non-UNSW questions
 
     async with ctx.typing():
-        previous_messages = await get_message_history(ctx.channel, ctx.message)
+        previous_messages = await get_message_history(ctx.channel, ctx.message)  # Gets 10 messages
         messages = previous_messages + [{"role": "user", "content": question}]
-
         response = await get_answer(messages)
         await ctx.reply(response)
         

@@ -3,6 +3,7 @@
 This project is a Discord bot that integrates with an external API to provide answers to user questions and fetch user information.
 
 For better service, please visit https://openonion.ai.
+you can install the bot using link https://discord.com/oauth2/authorize?client_id=1274612373340164107
 
 ## Features
 
