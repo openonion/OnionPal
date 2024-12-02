@@ -25,18 +25,17 @@ async def get_message_history(channel, current_message, limit=5):
             messages.append({"role": "user", "content": msg.author.name + ": " + msg.content})
     return list(reversed(messages))  # Return messages in chronological order
 
-async def get_answer(question):
+async def get_answer(messages):
     url = f'{API_URL}/api/v1/chat/premium_message'
     
+    # Ensure messages is in the correct format for the API
+    if not isinstance(messages, list):
+        messages = [{"role": "user", "content": messages}]
+        
     payload = {
-        "messages": [
-            {
-                "role": "user",
-                "content": question
-            }
-        ],
-        "stream": False,
+        "messages": messages,  # Now passing the full message history
         "model": "ofCourse",
+        "stream": False,
         "temperature": 0,
         "presence_penalty": 0,
         "frequency_penalty": 0,
@@ -71,10 +70,6 @@ async def get_answer(question):
                 
                 return complete_response
 
-    except aiohttp.ClientError as e:
-        error_msg = f"Network error: {str(e)}"
-        logging.error(error_msg)
-        return error_msg
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
         logging.error(error_msg)
@@ -147,11 +142,15 @@ async def on_message(message):
     # Check if the bot is mentioned
     if bot.user in message.mentions:
         async with message.channel.typing():
-            response = await get_answer(message.content)
+            # Get message history and construct messages
+            previous_messages = await get_message_history(message.channel, message)
+            messages = previous_messages + [{"role": "user", "content": message.content}]
+            
+            response = await get_answer(messages)
             await message.reply(response)
             
             additional_message = (
-                "Powered by https://openonion.ai.\n"
+                "For better service, please visit https://openonion.ai.\n"
             )
             await message.channel.send(additional_message)
         return
@@ -163,12 +162,15 @@ async def on_message(message):
             return  # Silently ignore non-UNSW questions
 
         async with message.channel.typing():
-            response = await get_answer(message.content)
+            # Get message history and construct messages
+            previous_messages = await get_message_history(message.channel, message)
+            messages = previous_messages + [{"role": "user", "content": message.content}]
+            
+            response = await get_answer(messages)
             await message.reply(response)
             
             additional_message = (
                 "For better service, please visit https://openonion.ai.\n"
-                "If you want to customize this bot, you can check the source code here: https://github.com/openonion/OnionPal"
             )
             await message.channel.send(additional_message)
 
@@ -192,7 +194,6 @@ async def ask_question(ctx, *, question):
         
         additional_message = (
             "For better service, please visit https://openonion.ai.\n"
-            "If you want to customize this bot, you can check the source code here: https://github.com/openonion/OnionPal"
         )
         await ctx.send(additional_message)
 
