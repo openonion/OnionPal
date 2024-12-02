@@ -2,6 +2,8 @@
 
 This project is a Discord bot that integrates with an external API to provide answers to user questions and fetch user information.
 
+For better service, please visit https://openonion.ai.
+
 ## Features
 
 - Automatically detects and responds to user questions in Discord channels.
