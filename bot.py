@@ -17,7 +17,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 async def get_answer(question):
     url = f'{API_URL}/api/v1/chat/premium_message'
-
+    
     payload = {
         "messages": [
             {
@@ -35,32 +35,44 @@ async def get_answer(question):
 
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f'Bearer {API_TOKEN}'  # Add the API token to the headers
+        'Authorization': f'Bearer {API_TOKEN}'
     }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers) as response:
-            buffer = ""
-            async for line in response.content:
-                if line:
-                    data = line.decode('utf-8').strip()
-                    logging.info(f"Received data: {data}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status != 200:
+                    yield f"Error: Server returned status {response.status}"
+                    return
 
-                    if data.startswith("data:"):
+                # Read the entire response at once
+                data = await response.text()
+                
+                # Split the response into lines
+                lines = data.split('\n')
+                buffer = ""
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('data: '):
                         try:
-                            json_data = json.loads(data.replace("data: ", "").strip())
+                            json_data = json.loads(line[6:])
                             answer_part = json_data.get("answer", "")
                             if answer_part and answer_part != '[DONE]':
-                                buffer += answer_part
-                                words = buffer.split(' ')
-                                for word in words[:-1]:
+                                # Split into words and yield them
+                                words = answer_part.split()
+                                for word in words:
                                     yield word
-                                buffer = words[-1]  # Keep the last word which might be incomplete
                         except json.JSONDecodeError:
-                            logging.error(f"Failed to parse JSON: {data}")
+                            logging.error(f"Failed to parse JSON: {line}")
+                            continue
 
-            if buffer:
-                yield buffer
+    except aiohttp.ClientError as e:
+        yield f"Network error: {str(e)}"
+        logging.error(f"Network error: {str(e)}")
+    except Exception as e:
+        yield f"Unexpected error: {str(e)}"
+        logging.error(f"Unexpected error: {str(e)}")
 
 async def get_user_info():
     url = f'{API_URL}/api/v1/user/getUserInfo'
