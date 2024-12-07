@@ -138,40 +138,49 @@ async def analyze_availabilities(messages):
     try:
         # Format the messages for OpenAI
         prompt = """
-As a scheduling assistant, analyze these availability messages and:
-1. Find all overlapping time slots between users
-2. Format the response in markdown
-3. If no common time is found, suggest who needs to provide more options
+As a scheduling assistant, analyze these availability messages and create a visual weekly calendar. Follow these steps:
+
+1. Create a markdown formatted weekly view with wider columns
+2. Mark available slots with ✅ and potential overlapping times with 🟢
+3. Include a summary of the best meeting times
+
+Format the response exactly like this example:
+
+## 📅 Weekly Availability Overview
+
+| Time    | Monday        | Tuesday       | Wednesday     | Thursday      | Friday        |
+|---------|--------------|--------------|--------------|--------------|--------------|
+| 9-11am  | ❌           | ✅ Aaron      | ✅ Aaron      | ❌           | ❌           |
+| 1-3pm   | ✅ Aaron      | 🟢 Aaron      | ❌           | ❌           | ✅ Aaron      |
+| 3-5pm   | ✅ Aaron      | ❌           | ❌           | ❌           | ✅ Aaron      |
+
+## 🎯 Best Meeting Times
+1. Tuesday 9-11am (Aaron available)
+2. Monday 1-3pm (Aaron available)
+3. Friday 3-5pm (Aaron available)
+
+## 📋 Summary
+🟢 Common slots: None
+✅ Partial availability: Monday 1-3pm, 3-5pm; Tuesday 9-11am; Friday 1-3pm, 3-5pm
+❌ No availability: All other times
+
+## 💡 Recommendations
+[If needed, suggest who should provide more options]
 
 Current availabilities:
 """
         for msg in messages:
             prompt += f"\n{msg['role']}: {msg['content']}"
 
-        prompt += """
-
-Please provide your analysis in this format:
-## This Week
-- Common slots: [list overlapping times]
-- Alternative slots: [if no common slots, suggest alternatives]
-
-## Next Week
-- Common slots: [list overlapping times]
-- Alternative slots: [if no common slots, suggest alternatives]
-
-## Recommendations
-[If needed, suggest who should provide more options and what times might work]
-"""
-
         # Call OpenAI API with new format
         response = await client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful scheduling assistant that analyzes availability and finds common time slots."},
+                {"role": "system", "content": "You are a scheduling assistant that creates clear, visual weekly calendars using markdown tables. Use exactly 12 dashes for each column separator in the table (|-----------|). Always format times in AM/PM format. Make sure to align the table properly."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=500
+            max_tokens=1000
         )
 
         return response.choices[0].message.content
@@ -185,7 +194,6 @@ async def create_scheduling_thread(interaction, mentioned_users):
         today = datetime.now().strftime("%Y-%m-%d")
         thread_name = f"{today} - Schedule Finding"
         
-        # Create thread in the channel where the command was used
         thread = await interaction.channel.create_thread(
             name=thread_name,
             auto_archive_duration=1440  # 24 hours
@@ -194,14 +202,12 @@ async def create_scheduling_thread(interaction, mentioned_users):
         initial_message = (
             "👋 Let's find a common time!\n\n"
             f"Finding available time slots for: {', '.join(user.mention for user in mentioned_users)}\n\n"
-            "Please share your availability for this week and next week using the format below:\n"
+            "Please share your availability for this week using the format below:\n"
             "```\n"
-            "This week:\n"
+            "Available times:\n"
             "- Monday 2-5pm\n"
             "- Wednesday 1-4pm\n"
-            "\nNext week:\n"
-            "- Tuesday 3-6pm\n"
-            "- Thursday 2-4pm\n"
+            "- Friday 10am-2pm\n"
             "```"
         )
         await thread.send(initial_message)
