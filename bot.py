@@ -4,14 +4,18 @@ from discord import app_commands
 import logging
 import aiohttp
 import asyncio
-from config import DISCORD_TOKEN, API_URL, API_TOKEN  # Import from config.py
+from config import DISCORD_TOKEN, API_URL, API_TOKEN, OPENAI_API_KEY  # Import from config.py
 from question_detector import is_question
 import json
 from typing import Tuple
 from datetime import datetime, timedelta
+from openai import AsyncOpenAI  # Update this import
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
+
+# Set up OpenAI with new client
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -131,16 +135,50 @@ async def evaluate_unsw_relevance(message: str) -> Tuple[bool, str]:
         return False, f"Error evaluating UNSW relevance: {str(e)}"
 
 async def analyze_availabilities(messages):
-    prompt = """
-You are a scheduling assistant. Based on these availability messages:
+    try:
+        # Format the messages for OpenAI
+        prompt = """
+As a scheduling assistant, analyze these availability messages and:
 1. Find all overlapping time slots between users
-2. Format the response in markdown with clear sections for This Week and Next Week
-3. If no common time is found, identify which users need to provide more options
+2. Format the response in markdown
+3. If no common time is found, suggest who needs to provide more options
 
-Current messages:
-""" + "\n".join([f"{m['role']}: {m['content']}" for m in messages])
-    
-    return await get_answer(prompt)
+Current availabilities:
+"""
+        for msg in messages:
+            prompt += f"\n{msg['role']}: {msg['content']}"
+
+        prompt += """
+
+Please provide your analysis in this format:
+## This Week
+- Common slots: [list overlapping times]
+- Alternative slots: [if no common slots, suggest alternatives]
+
+## Next Week
+- Common slots: [list overlapping times]
+- Alternative slots: [if no common slots, suggest alternatives]
+
+## Recommendations
+[If needed, suggest who should provide more options and what times might work]
+"""
+
+        # Call OpenAI API with new format
+        response = await client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful scheduling assistant that analyzes availability and finds common time slots."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        logging.error(f"Error in analyze_availabilities: {str(e)}")
+        return f"Error analyzing availabilities: {str(e)}"
 
 async def create_scheduling_thread(interaction, mentioned_users):
     try:
@@ -252,7 +290,7 @@ async def find_time_slash(interaction: discord.Interaction, users: str):
             await interaction.followup.send("⚠️ Please mention at least one user!\nExample: `/find_time @user1 @user2`")
             return
 
-        # Create thread in the channel where command was used
+        # Create thread
         thread = await create_scheduling_thread(interaction, mentioned_users)
         if not thread:
             return
@@ -280,12 +318,13 @@ async def find_time_slash(interaction: discord.Interaction, users: str):
                 if message.author.id not in responses:
                     responses[message.author.id] = message.content
                     
-                    # Analyze current responses
+                    # Format messages for analysis
                     messages = [
                         {"role": "user", "content": f"{bot.get_user(user_id).name}: {content}"}
                         for user_id, content in responses.items()
                     ]
                     
+                    # Get analysis from OpenAI
                     analysis = await analyze_availabilities(messages)
                     await thread.send(f"**Current Analysis:**\n{analysis}")
                     
