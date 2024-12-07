@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 import logging
 import aiohttp
 import asyncio
@@ -7,12 +8,15 @@ from config import DISCORD_TOKEN, API_URL, API_TOKEN  # Import from config.py
 from question_detector import is_question
 import json
 from typing import Tuple
+from datetime import datetime, timedelta
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
+intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
@@ -126,6 +130,52 @@ async def evaluate_unsw_relevance(message: str) -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Error evaluating UNSW relevance: {str(e)}"
 
+async def analyze_availabilities(messages):
+    prompt = """
+You are a scheduling assistant. Based on these availability messages:
+1. Find all overlapping time slots between users
+2. Format the response in markdown with clear sections for This Week and Next Week
+3. If no common time is found, identify which users need to provide more options
+
+Current messages:
+""" + "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+    
+    return await get_answer(prompt)
+
+async def create_scheduling_thread(interaction, mentioned_users):
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        thread_name = f"{today} - Schedule Finding"
+        
+        # Create thread in the channel where the command was used
+        thread = await interaction.channel.create_thread(
+            name=thread_name,
+            auto_archive_duration=1440  # 24 hours
+        )
+        
+        initial_message = (
+            "👋 Let's find a common time!\n\n"
+            f"Finding available time slots for: {', '.join(user.mention for user in mentioned_users)}\n\n"
+            "Please share your availability for this week and next week using the format below:\n"
+            "```\n"
+            "This week:\n"
+            "- Monday 2-5pm\n"
+            "- Wednesday 1-4pm\n"
+            "\nNext week:\n"
+            "- Tuesday 3-6pm\n"
+            "- Thursday 2-4pm\n"
+            "```"
+        )
+        await thread.send(initial_message)
+        return thread
+        
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Error: I don't have permission to create threads!")
+        return None
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error creating thread: {str(e)}")
+        return None
+
 @bot.event
 async def on_ready():
     logging.info(f'{bot.user} has connected to Discord!')
@@ -188,6 +238,104 @@ async def ask_question(ctx, *, question):
             "For better service, please visit https://openonion.ai.\n"
         )
         await ctx.send(additional_message)
+
+@bot.tree.command(name="find_time", description="Find a common time for multiple users")
+async def find_time_slash(interaction: discord.Interaction, users: str):
+    try:
+        # Defer the response since this might take a while
+        await interaction.response.defer(ephemeral=False)
+        
+        # Parse mentioned users from the users parameter
+        mentioned_users = [user for user in interaction.guild.members if str(user.id) in users]
+        
+        if not mentioned_users:
+            await interaction.followup.send("⚠️ Please mention at least one user!\nExample: `/find_time @user1 @user2`")
+            return
+
+        # Create thread in the channel where command was used
+        thread = await create_scheduling_thread(interaction, mentioned_users)
+        if not thread:
+            return
+
+        # Track mentioned users and responses
+        mentioned_users_ids = set(user.id for user in mentioned_users)
+        mentioned_users_ids.add(interaction.user.id)  # Include the command author
+        responses = {}
+
+        def check(m):
+            return m.author.id in mentioned_users_ids and m.channel.id == thread.id
+
+        # Send initial confirmation
+        await interaction.followup.send(f"Created scheduling thread: {thread.mention}")
+
+        # Wait for responses with timeout
+        timeout_duration = 300.0  # 5 minutes
+        end_time = datetime.now() + timedelta(seconds=timeout_duration)
+
+        while len(responses) < len(mentioned_users_ids) and datetime.now() < end_time:
+            try:
+                remaining_time = (end_time - datetime.now()).total_seconds()
+                message = await bot.wait_for('message', timeout=remaining_time, check=check)
+                
+                if message.author.id not in responses:
+                    responses[message.author.id] = message.content
+                    
+                    # Analyze current responses
+                    messages = [
+                        {"role": "user", "content": f"{bot.get_user(user_id).name}: {content}"}
+                        for user_id, content in responses.items()
+                    ]
+                    
+                    analysis = await analyze_availabilities(messages)
+                    await thread.send(f"**Current Analysis:**\n{analysis}")
+                    
+                    # If not everyone has responded, mention remaining users
+                    if len(responses) < len(mentioned_users_ids):
+                        waiting_for = [bot.get_user(uid).mention for uid in mentioned_users_ids if uid not in responses]
+                        await thread.send(f"📝 Still waiting to hear from: {', '.join(waiting_for)}")
+
+            except asyncio.TimeoutError:
+                await thread.send("⚠️ Scheduling timeout. Not all users responded within 5 minutes.")
+                break
+
+        # Final analysis
+        if responses:
+            if len(responses) == len(mentioned_users_ids):
+                await thread.send("✅ Everyone has responded! Here's the final schedule analysis:")
+            else:
+                responded_users = [bot.get_user(uid).mention for uid in responses.keys()]
+                missing_users = [bot.get_user(uid).mention for uid in mentioned_users_ids if uid not in responses]
+                await thread.send(
+                    "⚠️ **Scheduling Incomplete**\n\n"
+                    f"Responded users: {', '.join(responded_users)}\n"
+                    f"Missing responses from: {', '.join(missing_users)}\n\n"
+                    "Here's the analysis based on available responses:"
+                )
+            
+            final_messages = [
+                {"role": "user", "content": f"{bot.get_user(user_id).name}: {content}"}
+                for user_id, content in responses.items()
+            ]
+            final_analysis = await analyze_availabilities(final_messages)
+            await thread.send(final_analysis)
+
+    except Exception as e:
+        logging.error(f"Error in find_time command: {str(e)}")
+        await interaction.followup.send(f"❌ An error occurred: {str(e)}")
+
+# Add this to sync commands on startup
+@bot.event
+async def on_ready():
+    logging.info(f'{bot.user} has connected to Discord!')
+    logging.info(f'Bot is in {len(bot.guilds)} guilds')
+    await get_user_info()
+    
+    # Sync the command tree
+    try:
+        synced = await bot.tree.sync()
+        logging.info(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        logging.error(f"Failed to sync commands: {e}")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
